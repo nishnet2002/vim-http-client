@@ -36,6 +36,16 @@ def do_request(block, buf):
     variables = dict((m.groups() for m in (GLOBAL_VAR_REGEX.match(l) for l in buf) if m))
     variables.update(dict((m.groups() for m in (VAR_REGEX.match(l) for l in block) if m)))
 
+    def to_file(expr):
+      type, arg = FILE_REGEX.match(expr).groups()
+      arg = arg.replace('\\(', '(').replace('\\)', ')')
+      try:
+         return open(arg, 'rb') if type == 'file' else (arg)
+      except IOError:
+         raise ValueError('File: %s not found' % arg)
+
+    variables.update(dict([(k, to_file(v).read().strip("\n\r\t")) for (k, v) in variables.items() if FILE_REGEX.match(v)]))
+
     block = [line for line in block if not is_comment(line) and line.strip() != '']
 
     if len(block) == 0:
@@ -66,10 +76,6 @@ def do_request(block, buf):
     if all([ '=' in l for l in data ]):
       # Form data: separate entries into data dict, and files dict
       key_value_pairs = dict([ l.split('=', 1) for l in data ])
-      def to_file(expr):
-        type, arg = FILE_REGEX.match(expr).groups()
-        arg = arg.replace('\\(', '(').replace('\\)', ')')
-        return open(arg, 'rb') if type == 'file' else (arg)
 
       files = dict([(k, to_file(v)) for (k, v) in key_value_pairs.items() if FILE_REGEX.match(v)])
       data = dict([(k, v) for (k, v) in key_value_pairs.items() if not FILE_REGEX.match(v)])
@@ -219,8 +225,34 @@ def run_tests():
     ], [ '# $global = httpbin.org']))
     test(resp['form']['forma'] == 'a', 'Global variables are substituted.')
 
+    try:
+        do_request([
+            'POST http://$global/get',
+            'X-Hey-InvalidFile=$invalidFile'
+            ], ['# $invalidFile=!file(#doesnotexist!)'])
+        test(1 == 2, 'Files doesnt Exist')
+    except ValueError:
+        test(1 == 1, 'Files doesnt Exist')
+
     import os
     from tempfile import NamedTemporaryFile
+
+    SAMPLE_FILE_CONTENT = 'sample file content'
+
+    temp_file = NamedTemporaryFile(delete = False)
+    temp_file.write(SAMPLE_FILE_CONTENT)
+    temp_file.close()
+    resp = extract_json(do_request([
+        'POST http://httpbin.org/post',
+        'X-Header:$filedata',
+        'forma=a',
+        'formb=b',
+        "formc=!file(%s)" % temp_file.name,
+    ], ['# $filedata = !file(%s)' % temp_file.name]))
+    test(resp['headers']['X-Header'] == SAMPLE_FILE_CONTENT, 'Headers are passed with variable substitution.')
+    test(resp['files']['formc'] == SAMPLE_FILE_CONTENT, 'Files given as path are sent properly.')
+    test(not 'formc' in resp['form'], 'File not included in form data.')
+    os.unlink(temp_file.name)
 
     SAMPLE_FILE_CONTENT = 'sample file content'
 
