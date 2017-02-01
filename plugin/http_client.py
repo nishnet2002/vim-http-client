@@ -44,7 +44,10 @@ def do_request(block, buf):
       except IOError:
          raise ValueError('File: %s not found' % arg)
 
-    variables.update(dict([(k, to_file(v).read().strip("\n\r\t")) for (k, v) in variables.items() if FILE_REGEX.match(v)]))
+    try:
+      variables.update(dict([(k, to_file(v).read().strip("\n\r\t")) for (k, v) in variables.items() if FILE_REGEX.match(v)]))
+    except ValueError as err:
+        print(err)
 
     block = [line for line in block if not is_comment(line) and line.strip() != '']
 
